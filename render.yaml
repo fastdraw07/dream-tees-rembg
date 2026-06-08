@@ -1,0 +1,11 @@
+# render.yaml — lets Render deploy this service automatically from the repo.
+# In Render: New + -> Blueprint -> point at the repo containing this file.
+services:
+  - type: web
+    name: dream-tees-rembg
+    runtime: python
+    plan: free            # change to "starter" ($7/mo, no spin-down) when buyers arrive
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    autoDeploy: true
