@@ -54,7 +54,7 @@ def _decode_image(b64: str) -> bytes:
 @app.get("/")
 def health():
     # Hitting this endpoint also wakes the service from sleep on the free tier.
-    return {"status": "ok", "service": "dream-tees-rembg", "model": "u2netp"}
+    return {"status": "ok", "service": "dream-tees-rembg", "model": "u2netp", "rev": "cors-2"}
 
 
 @app.post("/remove")
