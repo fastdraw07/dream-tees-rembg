@@ -12,8 +12,19 @@
 #   POST /remove  -> { "image": "<base64 or data URL>" } -> { "image": "data:image/png;base64,..." }
 
 import base64
+import gc
 import io
+import os
 import re
+
+# --- Memory trimming for the 512MB tier (must be set BEFORE importing rembg/
+# onnxruntime). onnxruntime over-allocates memory and threads by default; on a
+# small instance that pushes inference past 512MB and the worker gets killed.
+# These caps keep the inference footprint small enough to fit.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("ORT_DISABLE_MEMORY_ARENA", "1")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,7 +65,7 @@ def _decode_image(b64: str) -> bytes:
 @app.get("/")
 def health():
     # Hitting this endpoint also wakes the service from sleep on the free tier.
-    return {"status": "ok", "service": "dream-tees-rembg", "model": "u2netp", "rev": "cors-2"}
+    return {"status": "ok", "service": "dream-tees-rembg", "model": "u2netp", "rev": "mem-trim-3"}
 
 
 @app.post("/remove")
@@ -68,9 +79,10 @@ def remove_background(req: RemoveRequest):
         # Open and ensure RGBA.
         input_image = Image.open(io.BytesIO(raw)).convert("RGBA")
 
-        # Cap working size to limit peak memory on the 512MB tier. gpt-image
-        # output is typically 1024px; this only shrinks unusually large inputs.
-        MAX_SIDE = 1024
+        # Cap working size hard to limit peak memory on the 512MB tier. 512px
+        # still gives a usable cutout mask; the edge is slightly softer than at
+        # full res but well within print tolerance for shirt art.
+        MAX_SIDE = 512
         if max(input_image.size) > MAX_SIDE:
             input_image.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
 
@@ -79,6 +91,12 @@ def remove_background(req: RemoveRequest):
         buf = io.BytesIO()
         output_image.save(buf, format="PNG")
         out_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+        # Release inference buffers promptly so memory doesn't accumulate
+        # across requests on the small instance.
+        del input_image, output_image, buf
+        gc.collect()
+
         return {"image": f"data:image/png;base64,{out_b64}"}
     except Exception as e:
         # On any failure, signal the app so it can fall back to the original.
